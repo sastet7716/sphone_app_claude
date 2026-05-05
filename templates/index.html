@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>チェックボックス保存アプリ</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        margin: 2rem;
+      }
+      .container {
+        max-width: 420px;
+        padding: 1rem 1.2rem;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: 1.2rem;
+      }
+      .checkbox-group label {
+        display: block;
+        margin: 0.6rem 0;
+      }
+      button {
+        margin-top: 0.8rem;
+        padding: 0.5rem 0.9rem;
+        border: 1px solid #999;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>3つのチェックボックス</h1>
+      <form method="post">
+        <div class="checkbox-group">
+          <label>
+            <input type="checkbox" name="check1" {% if state.check1 %}checked{% endif %} />
+            チェック 1
+          </label>
+          <label>
+            <input type="checkbox" name="check2" {% if state.check2 %}checked{% endif %} />
+            チェック 2
+          </label>
+          <label>
+            <input type="checkbox" name="check3" {% if state.check3 %}checked{% endif %} />
+            チェック 3
+          </label>
+        </div>
+        <button type="submit">保存</button>
+      </form>
+    </div>
+  </body>
+</html>
