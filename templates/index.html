@@ -32,6 +32,9 @@
         display: block;
         margin: 0.6rem 0;
       }
+      .choice-group label.is-disabled {
+        color: #888;
+      }
       .field {
         margin: 0.5rem 0;
       }
@@ -53,8 +56,11 @@
   <body>
     <div class="container">
       {% if login_id %}
-        <h1>4つの選択肢（いずれか1つまで）</h1>
+        <h1>4つの選択肢（いずれか1つまで・他ユーザー選択済みは不可）</h1>
         <div class="status">ログイン中: {{ login_id }}</div>
+        {% if error %}
+          <div class="error">{{ error }}</div>
+        {% endif %}
         <form method="post">
           <div class="choice-group">
             <label>
@@ -66,41 +72,45 @@
               />
               選択なし
             </label>
-            <label>
+            <label class="{% if 'check1' in disabled_choices %}is-disabled{% endif %}">
               <input
                 type="radio"
                 name="choice"
                 value="check1"
                 {% if selected_choice == 'check1' %}checked{% endif %}
+                {% if 'check1' in disabled_choices %}disabled{% endif %}
               />
-              チェック 1
+              チェック 1{% if 'check1' in disabled_choices %}（他ユーザーが使用中）{% endif %}
             </label>
-            <label>
+            <label class="{% if 'check2' in disabled_choices %}is-disabled{% endif %}">
               <input
                 type="radio"
                 name="choice"
                 value="check2"
                 {% if selected_choice == 'check2' %}checked{% endif %}
+                {% if 'check2' in disabled_choices %}disabled{% endif %}
               />
-              チェック 2
+              チェック 2{% if 'check2' in disabled_choices %}（他ユーザーが使用中）{% endif %}
             </label>
-            <label>
+            <label class="{% if 'check3' in disabled_choices %}is-disabled{% endif %}">
               <input
                 type="radio"
                 name="choice"
                 value="check3"
                 {% if selected_choice == 'check3' %}checked{% endif %}
+                {% if 'check3' in disabled_choices %}disabled{% endif %}
               />
-              チェック 3
+              チェック 3{% if 'check3' in disabled_choices %}（他ユーザーが使用中）{% endif %}
             </label>
-            <label>
+            <label class="{% if 'check4' in disabled_choices %}is-disabled{% endif %}">
               <input
                 type="radio"
                 name="choice"
                 value="check4"
                 {% if selected_choice == 'check4' %}checked{% endif %}
+                {% if 'check4' in disabled_choices %}disabled{% endif %}
               />
-              チェック 4
+              チェック 4{% if 'check4' in disabled_choices %}（他ユーザーが使用中）{% endif %}
             </label>
           </div>
           <button type="submit">保存</button>
