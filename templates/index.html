@@ -28,7 +28,7 @@
         margin: 0.5rem 0 0.8rem;
         color: #b00020;
       }
-      .checkbox-group label {
+      .choice-group label {
         display: block;
         margin: 0.6rem 0;
       }
@@ -53,24 +53,53 @@
   <body>
     <div class="container">
       {% if login_id %}
-        <h1>4つのチェックボックス</h1>
+        <h1>4つの選択肢（いずれか1つまで）</h1>
         <div class="status">ログイン中: {{ login_id }}</div>
         <form method="post">
-          <div class="checkbox-group">
+          <div class="choice-group">
             <label>
-              <input type="checkbox" name="check1" {% if state.check1 %}checked{% endif %} />
+              <input
+                type="radio"
+                name="choice"
+                value=""
+                {% if selected_choice == '' %}checked{% endif %}
+              />
+              選択なし
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="choice"
+                value="check1"
+                {% if selected_choice == 'check1' %}checked{% endif %}
+              />
               チェック 1
             </label>
             <label>
-              <input type="checkbox" name="check2" {% if state.check2 %}checked{% endif %} />
+              <input
+                type="radio"
+                name="choice"
+                value="check2"
+                {% if selected_choice == 'check2' %}checked{% endif %}
+              />
               チェック 2
             </label>
             <label>
-              <input type="checkbox" name="check3" {% if state.check3 %}checked{% endif %} />
+              <input
+                type="radio"
+                name="choice"
+                value="check3"
+                {% if selected_choice == 'check3' %}checked{% endif %}
+              />
               チェック 3
             </label>
             <label>
-              <input type="checkbox" name="check4" {% if state.check4 %}checked{% endif %} />
+              <input
+                type="radio"
+                name="choice"
+                value="check4"
+                {% if selected_choice == 'check4' %}checked{% endif %}
+              />
               チェック 4
             </label>
           </div>

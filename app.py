@@ -102,6 +102,21 @@ def load_state(login_id: str) -> dict[str, bool]:
     }
 
 
+VALID_CHOICES = frozenset({"check1", "check2", "check3", "check4"})
+
+
+def choice_to_flags(choice: str) -> tuple[bool, bool, bool, bool]:
+    """常に高々1つだけ True。choice が空または不正ならすべて False。"""
+    if choice not in VALID_CHOICES:
+        return False, False, False, False
+    return (
+        choice == "check1",
+        choice == "check2",
+        choice == "check3",
+        choice == "check4",
+    )
+
+
 def save_state(
     login_id: str, check1: bool, check2: bool, check3: bool, check4: bool
 ) -> None:
@@ -118,6 +133,14 @@ def save_state(
         conn.commit()
 
 
+def selected_choice_from_state(state: dict[str, bool]) -> str:
+    """表示用。複数 True のレガシーデータは先頭の項目のみ採用。"""
+    for key in ("check1", "check2", "check3", "check4"):
+        if state.get(key):
+            return key
+    return ""
+
+
 # WSGIサーバー(gunicornなど)で起動されたときもDB初期化する
 init_db()
 
@@ -131,15 +154,20 @@ def index():
     ensure_user_row(login_id)
 
     if request.method == "POST":
-        check1 = "check1" in request.form
-        check2 = "check2" in request.form
-        check3 = "check3" in request.form
-        check4 = "check4" in request.form
+        choice = (request.form.get("choice") or "").strip()
+        check1, check2, check3, check4 = choice_to_flags(choice)
         save_state(login_id, check1, check2, check3, check4)
         return redirect(url_for("index"))
 
     state = load_state(login_id)
-    return render_template("index.html", state=state, login_id=login_id, error=None)
+    selected_choice = selected_choice_from_state(state)
+    return render_template(
+        "index.html",
+        state=state,
+        selected_choice=selected_choice,
+        login_id=login_id,
+        error=None,
+    )
 
 
 @app.route("/login", methods=["POST"])
