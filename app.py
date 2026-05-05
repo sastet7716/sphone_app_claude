@@ -1,71 +1,75 @@
 from __future__ import annotations
 
 import os
-import sqlite3
-from pathlib import Path
-
 from flask import Flask, redirect, render_template, request, url_for
+import psycopg
 
-
-BASE_DIR = Path(__file__).resolve().parent
-DB_PATH = BASE_DIR / "checkboxes.db"
 
 app = Flask(__name__)
+DATABASE_URL = os.environ.get("DATABASE_URL")
+
+if not DATABASE_URL:
+    raise RuntimeError(
+        "DATABASE_URL が未設定です。無料PostgreSQLの接続URLを環境変数に設定してください。"
+    )
 
 
-def get_connection() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+def get_connection() -> psycopg.Connection:
+    return psycopg.connect(DATABASE_URL)
 
 
 def init_db() -> None:
     with get_connection() as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS checkbox_state (
-                id INTEGER PRIMARY KEY CHECK (id = 1),
-                check1 INTEGER NOT NULL DEFAULT 0,
-                check2 INTEGER NOT NULL DEFAULT 0,
-                check3 INTEGER NOT NULL DEFAULT 0
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS checkbox_state (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    check1 BOOLEAN NOT NULL DEFAULT FALSE,
+                    check2 BOOLEAN NOT NULL DEFAULT FALSE,
+                    check3 BOOLEAN NOT NULL DEFAULT FALSE
+                )
+                """
             )
-            """
-        )
-        conn.execute(
-            """
-            INSERT OR IGNORE INTO checkbox_state (id, check1, check2, check3)
-            VALUES (1, 0, 0, 0)
-            """
-        )
+            cur.execute(
+                """
+                INSERT INTO checkbox_state (id, check1, check2, check3)
+                VALUES (1, FALSE, FALSE, FALSE)
+                ON CONFLICT (id) DO NOTHING
+                """
+            )
         conn.commit()
 
 
 def load_state() -> dict[str, bool]:
     with get_connection() as conn:
-        row = conn.execute(
-            "SELECT check1, check2, check3 FROM checkbox_state WHERE id = 1"
-        ).fetchone()
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT check1, check2, check3 FROM checkbox_state WHERE id = 1"
+            )
+            row = cur.fetchone()
 
     if row is None:
         return {"check1": False, "check2": False, "check3": False}
 
     return {
-        "check1": bool(row["check1"]),
-        "check2": bool(row["check2"]),
-        "check3": bool(row["check3"]),
+        "check1": bool(row[0]),
+        "check2": bool(row[1]),
+        "check3": bool(row[2]),
     }
 
 
 def save_state(check1: bool, check2: bool, check3: bool) -> None:
     with get_connection() as conn:
-        conn.execute(
-            """
-            UPDATE checkbox_state
-            SET check1 = ?, check2 = ?, check3 = ?
-            WHERE id = 1
-            """,
-            (int(check1), int(check2), int(check3)),
-        )
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE checkbox_state
+                SET check1 = %s, check2 = %s, check3 = %s
+                WHERE id = 1
+                """,
+                (check1, check2, check3),
+            )
         conn.commit()
 
 
