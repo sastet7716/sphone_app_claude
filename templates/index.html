@@ -19,9 +19,27 @@
         margin-top: 0;
         font-size: 1.2rem;
       }
+      .status {
+        margin: 0.5rem 0 0.8rem;
+        color: #555;
+        font-size: 0.95rem;
+      }
+      .error {
+        margin: 0.5rem 0 0.8rem;
+        color: #b00020;
+      }
       .checkbox-group label {
         display: block;
         margin: 0.6rem 0;
+      }
+      .field {
+        margin: 0.5rem 0;
+      }
+      input[type="text"],
+      input[type="password"] {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 0.45rem;
       }
       button {
         margin-top: 0.8rem;
@@ -34,28 +52,50 @@
   </head>
   <body>
     <div class="container">
-      <h1>4つのチェックボックス</h1>
-      <form method="post">
-        <div class="checkbox-group">
-          <label>
-            <input type="checkbox" name="check1" {% if state.check1 %}checked{% endif %} />
-            チェック 1
-          </label>
-          <label>
-            <input type="checkbox" name="check2" {% if state.check2 %}checked{% endif %} />
-            チェック 2
-          </label>
-          <label>
-            <input type="checkbox" name="check3" {% if state.check3 %}checked{% endif %} />
-            チェック 3
-          </label>
-          <label>
-            <input type="checkbox" name="check4" {% if state.check4 %}checked{% endif %} />
-            チェック 4
-          </label>
-        </div>
-        <button type="submit">保存</button>
-      </form>
+      {% if login_id %}
+        <h1>4つのチェックボックス</h1>
+        <div class="status">ログイン中: {{ login_id }}</div>
+        <form method="post">
+          <div class="checkbox-group">
+            <label>
+              <input type="checkbox" name="check1" {% if state.check1 %}checked{% endif %} />
+              チェック 1
+            </label>
+            <label>
+              <input type="checkbox" name="check2" {% if state.check2 %}checked{% endif %} />
+              チェック 2
+            </label>
+            <label>
+              <input type="checkbox" name="check3" {% if state.check3 %}checked{% endif %} />
+              チェック 3
+            </label>
+            <label>
+              <input type="checkbox" name="check4" {% if state.check4 %}checked{% endif %} />
+              チェック 4
+            </label>
+          </div>
+          <button type="submit">保存</button>
+        </form>
+        <form method="post" action="/logout">
+          <button type="submit">ログアウト</button>
+        </form>
+      {% else %}
+        <h1>ログイン</h1>
+        {% if error %}
+          <div class="error">{{ error }}</div>
+        {% endif %}
+        <form method="post" action="/login">
+          <div class="field">
+            <label for="login_id">ログインID</label>
+            <input id="login_id" type="text" name="login_id" required />
+          </div>
+          <div class="field">
+            <label for="password">パスワード</label>
+            <input id="password" type="password" name="password" required />
+          </div>
+          <button type="submit">ログイン</button>
+        </form>
+      {% endif %}
     </div>
   </body>
 </html>
