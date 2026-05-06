@@ -10,7 +10,7 @@
         margin: 2rem;
       }
       .container {
-        max-width: 520px;
+        max-width: 560px;
         padding: 1rem 1.2rem;
         border: 1px solid #ddd;
         border-radius: 8px;
@@ -33,12 +33,28 @@
         margin: 0.5rem 0 0.8rem;
         color: #b00020;
       }
-      .choice-group label {
-        display: block;
+      .choice-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
         margin: 0.45rem 0;
       }
-      .choice-group label.is-disabled {
+      .choice-main {
+        display: flex;
+        align-items: center;
+        gap: 0.35rem;
+        min-width: 0;
+      }
+      .choice-main.is-disabled {
         color: #888;
+      }
+      .choice-status {
+        flex-shrink: 0;
+        font-size: 0.88rem;
+        color: #444;
+        min-width: 10rem;
+        text-align: right;
       }
       .field {
         margin: 0.5rem 0;
@@ -63,53 +79,146 @@
       {% if login_id %}
         <h1>{{ app_name }}</h1>
         <p class="subtitle">
-          交差点01〜12からいずれか1つまで（他のユーザーが選んだ交差点は選べません）
+          交差点を選ぶとすぐに保存されます（他ユーザーの交差点は選べません）
         </p>
         <div class="status">ログイン中: {{ login_id }}</div>
         {% if error %}
           <div class="error">{{ error }}</div>
         {% endif %}
-        {% if no_slot_available %}
-          <div class="error">
-            現在、どの交差点も空いていません（12か所とも他ユーザーが使用中です）。
-          </div>
-        {% endif %}
-        <form method="post" id="choice-form">
+        <div id="live-error" class="error" style="display: none"></div>
+        <div
+          id="no-slot-msg"
+          class="error"
+          {% if not no_slot_available %}style="display: none"{% endif %}
+        >
+          現在、どの交差点も空いていません（12か所とも他ユーザーが使用中です）。
+        </div>
+        <div id="choice-app">
           <div class="choice-group">
             {% for value, label in choices_display %}
-            <label class="{% if value in choice_owners %}is-disabled{% endif %}">
-              <input
-                type="radio"
-                name="choice"
-                value="{{ value }}"
-                {% if selected_choice == value %}checked{% endif %}
-                {% if value in choice_owners %}disabled{% endif %}
-              />
-              {{ label }}{% if value in choice_owners %}（{{ choice_owners[value] }}さんが使用中）{% endif %}
-            </label>
+            <div class="choice-row" data-choice="{{ value }}">
+              <label
+                class="choice-main {% if value in occupants and occupants[value] != login_id %}is-disabled{% endif %}"
+              >
+                <input
+                  type="radio"
+                  name="choice"
+                  value="{{ value }}"
+                  {% if selected_choice == value %}checked{% endif %}
+                  {% if value in occupants and occupants[value] != login_id %}disabled{% endif %}
+                />
+                {{ label }}
+              </label>
+              <span class="choice-status">
+                {%- if value in occupants -%}
+                  {{ occupants[value] }}さんが使用中
+                {%- endif -%}
+              </span>
+            </div>
             {% endfor %}
           </div>
-          <button type="submit" {% if no_slot_available %}disabled{% endif %}>保存</button>
-        </form>
+        </div>
         <form method="post" action="/logout">
           <button type="submit">ログアウト</button>
         </form>
         <script>
           (function () {
-            var form = document.getElementById("choice-form");
-            if (!form) return;
-            var radios = form.querySelectorAll('input[type="radio"][name="choice"]');
-            radios.forEach(function (radio) {
-              if (radio.disabled) return;
-              radio.addEventListener("mousedown", function () {
-                radio.setAttribute("data-was-checked", radio.checked ? "1" : "");
-              });
-              radio.addEventListener("click", function () {
-                if (radio.getAttribute("data-was-checked") === "1") {
-                  radio.checked = false;
+            var root = document.getElementById("choice-app");
+            if (!root) return;
+
+            function applyFromApi(data) {
+              var loginId = data.login_id;
+              var occ = data.occupants || {};
+              var selected = data.selected_choice || "";
+              root.querySelectorAll(".choice-row").forEach(function (row) {
+                var key = row.getAttribute("data-choice");
+                var radio = row.querySelector('input[name="choice"]');
+                var status = row.querySelector(".choice-status");
+                var label = row.querySelector(".choice-main");
+                var owner = occ[key];
+                if (owner) {
+                  status.textContent = owner + "さんが使用中";
+                  if (owner !== loginId) {
+                    radio.disabled = true;
+                    label.classList.add("is-disabled");
+                  } else {
+                    radio.disabled = false;
+                    label.classList.remove("is-disabled");
+                  }
+                } else {
+                  status.textContent = "";
+                  radio.disabled = false;
+                  label.classList.remove("is-disabled");
                 }
-                radio.removeAttribute("data-was-checked");
+                radio.checked = selected === key;
               });
+              var slotEl = document.getElementById("no-slot-msg");
+              if (slotEl) {
+                slotEl.style.display = data.no_slot_available ? "block" : "none";
+              }
+            }
+
+            function saveChoice(choice) {
+              fetch("/api/save-choice", {
+                method: "POST",
+                credentials: "same-origin",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ choice: choice }),
+              })
+                .then(function (r) {
+                  return r.json();
+                })
+                .then(function (data) {
+                  var errEl = document.getElementById("live-error");
+                  if (!data.ok) {
+                    if (errEl) {
+                      errEl.textContent = data.error || "";
+                      errEl.style.display = "block";
+                    }
+                    window.location.reload();
+                    return;
+                  }
+                  if (errEl) {
+                    errEl.textContent = "";
+                    errEl.style.display = "none";
+                  }
+                  applyFromApi(data);
+                })
+                .catch(function () {
+                  window.location.reload();
+                });
+            }
+
+            function syncSave() {
+              var checked = root.querySelector('input[name="choice"]:checked');
+              saveChoice(checked ? checked.value : "");
+            }
+
+            root.addEventListener("change", function (e) {
+              if (e.target && e.target.name === "choice") syncSave();
+            });
+
+            function radioFromEventTarget(t) {
+              if (t.matches && t.matches('input[name="choice"]')) return t;
+              var lab = t.closest && t.closest("label.choice-main");
+              if (lab) return lab.querySelector('input[name="choice"]');
+              return null;
+            }
+
+            root.addEventListener("mousedown", function (e) {
+              var radio = radioFromEventTarget(e.target);
+              if (!radio || radio.disabled) return;
+              radio.setAttribute("data-was-checked", radio.checked ? "1" : "");
+            });
+
+            root.addEventListener("click", function (e) {
+              var radio = radioFromEventTarget(e.target);
+              if (!radio || radio.disabled) return;
+              if (radio.getAttribute("data-was-checked") === "1") {
+                radio.checked = false;
+                syncSave();
+              }
+              radio.removeAttribute("data-was-checked");
             });
           })();
         </script>

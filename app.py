@@ -4,7 +4,7 @@ import csv
 import os
 from pathlib import Path
 
-from flask import Flask, redirect, render_template, request, session, url_for
+from flask import Flask, jsonify, redirect, render_template, request, session, url_for
 import psycopg
 import psycopg.errors
 
@@ -213,21 +213,14 @@ def selected_choice_from_state(state: dict[str, bool]) -> str:
     return ""
 
 
-def choice_held_by_others(exclude_login_id: str) -> dict[str, str]:
-    """各交差点を、自分以外のどの login_id が保持しているか。"""
+def choice_held_globally() -> dict[str, str]:
+    """各交差点を保持している login_id（空きはキーなし）。"""
     cols = CHOICE_KEYS
     owners: dict[str, str] = {}
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
-                SELECT login_id, """
-                + ", ".join(cols)
-                + """
-                FROM user_checkbox_state
-                WHERE login_id != %s
-                """,
-                (exclude_login_id,),
+                "SELECT login_id, " + ", ".join(cols) + " FROM user_checkbox_state"
             )
             for row in cur.fetchall():
                 lid = row[0]
@@ -237,28 +230,81 @@ def choice_held_by_others(exclude_login_id: str) -> dict[str, str]:
     return owners
 
 
-def first_free_choice(held_by_others: dict[str, str]) -> str | None:
-    """他ユーザーに取られていない最初の交差点。空きがなければ None。"""
-    for k in CHOICE_KEYS:
-        if k not in held_by_others:
-            return k
-    return None
-
-
 def choices_display() -> list[tuple[str, str]]:
     """テンプレート用 (value, 表示ラベル)"""
     return [(f"check{i}", f"交差点{i:02d}") for i in range(1, 13)]
+
+
+def _no_slot_available(login_id: str, state: dict[str, bool], occupants: dict[str, str]) -> bool:
+    stored = selected_choice_from_state(state)
+    if stored:
+        return False
+    return all(k in occupants for k in CHOICE_KEYS)
+
+
+def try_save_choice(login_id: str, choice: str) -> tuple[bool, str | None, dict]:
+    """
+    選択を保存。成功時は JSON 用 dict（occupants, selected_choice 等）を返す。
+    """
+    if choice not in VALID_CHOICES and choice != "":
+        return False, "不正な選択です。", {}
+
+    occupants_before = choice_held_globally()
+
+    if choice == "":
+        save_state(login_id, (False,) * 12)
+        occupants = choice_held_globally()
+        state = load_state(login_id)
+        return True, None, {
+            "selected_choice": "",
+            "occupants": occupants,
+            "login_id": login_id,
+            "no_slot_available": _no_slot_available(login_id, state, occupants),
+        }
+
+    occ = occupants_before.get(choice)
+    if occ is not None and occ != login_id:
+        return (
+            False,
+            f"その交差点は {occ} さんが使用中です。別の交差点を選ぶか、しばらく待ってください。",
+            {},
+        )
+
+    flags = choice_to_flags(choice)
+    try:
+        save_state(login_id, flags)
+    except psycopg.errors.UniqueViolation:
+        occupants = choice_held_globally()
+        o2 = occupants.get(choice)
+        if o2 is not None and o2 != login_id:
+            return (
+                False,
+                f"その交差点は {o2} さんが使用中です。（同時に選ばれました）",
+                {},
+            )
+        return (
+            False,
+            "別のユーザーが先に選んだため保存できませんでした。画面を更新してください。",
+            {},
+        )
+
+    occupants = choice_held_globally()
+    state = load_state(login_id)
+    return True, None, {
+        "selected_choice": selected_choice_from_state(state),
+        "occupants": occupants,
+        "login_id": login_id,
+        "no_slot_available": _no_slot_available(login_id, state, occupants),
+    }
 
 
 def render_main_logged_in(login_id: str, error: str | None = None):
     ensure_user_row(login_id)
     state = load_state(login_id)
     stored = selected_choice_from_state(state)
-    choice_owners = choice_held_by_others(login_id)
-    ff = first_free_choice(choice_owners)
-    # DBに未保存のときは画面も未選択（先頭の空きを自動では選ばない）
+    occupants = choice_held_globally()
     selected_choice = stored
-    no_slot_available = not stored and ff is None
+    no_slot_available = _no_slot_available(login_id, state, occupants)
     return render_template(
         "index.html",
         app_name=APP_NAME,
@@ -267,7 +313,7 @@ def render_main_logged_in(login_id: str, error: str | None = None):
         selected_choice=selected_choice,
         login_id=login_id,
         error=error,
-        choice_owners=choice_owners,
+        occupants=occupants,
         no_slot_available=no_slot_available,
     )
 
@@ -287,43 +333,28 @@ def index():
             state=None,
             login_id=None,
             error=None,
-            choice_owners={},
+            occupants={},
             no_slot_available=False,
         )
 
-    if request.method == "POST":
-        choice = (request.form.get("choice") or "").strip()
-        if choice not in VALID_CHOICES and choice != "":
-            return render_main_logged_in(
-                login_id,
-                error="不正な選択です。",
-            )
-
-        # 未選択のまま保存 = DB上もすべて OFF（ラジオをクリックで解除した状態）
-        if choice == "":
-            save_state(login_id, (False,) * 12)
-            return redirect(url_for("index"))
-
-        held = choice_held_by_others(login_id)
-        if choice in held:
-            who = held[choice]
-            return render_main_logged_in(
-                login_id,
-                error=f"その交差点は {who} さんが使用中です。別の交差点を選ぶか、しばらく待ってください。",
-            )
-        flags = choice_to_flags(choice)
-        try:
-            save_state(login_id, flags)
-        except psycopg.errors.UniqueViolation:
-            held_after = choice_held_by_others(login_id)
-            if choice in held_after:
-                err = f"その交差点は {held_after[choice]} さんが使用中です。（同時に選ばれました）"
-            else:
-                err = "別のユーザーが先に選んだため保存できませんでした。画面を更新してください。"
-            return render_main_logged_in(login_id, error=err)
-        return redirect(url_for("index"))
-
     return render_main_logged_in(login_id)
+
+
+@app.post("/api/save-choice")
+def api_save_choice():
+    login_id = session.get("login_id")
+    if not login_id:
+        return jsonify({"ok": False, "error": "ログインが必要です。"}), 401
+
+    ensure_user_row(login_id)
+    data = request.get_json(silent=True) or {}
+    choice = (data.get("choice") or "").strip()
+
+    ok, err, payload = try_save_choice(login_id, choice)
+    if not ok:
+        return jsonify({"ok": False, "error": err or "保存に失敗しました。"}), 400
+
+    return jsonify({"ok": True, **payload})
 
 
 @app.route("/login", methods=["POST"])
@@ -339,7 +370,7 @@ def login():
             state=None,
             login_id=None,
             error="ログインIDとパスワードを入力してください。",
-            choice_owners={},
+            occupants={},
             no_slot_available=False,
         )
 
@@ -351,7 +382,7 @@ def login():
             state=None,
             login_id=None,
             error="認証に失敗しました。IDまたはパスワードを確認してください。",
-            choice_owners={},
+            occupants={},
             no_slot_available=False,
         )
 
