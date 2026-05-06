@@ -26,6 +26,62 @@ def get_connection() -> psycopg.Connection:
     return psycopg.connect(DATABASE_URL)
 
 
+def _migrate_user_rows_for_unique_indexes(conn: psycopg.Connection) -> None:
+    """
+    既存DBに「同じ項目を複数ユーザーがTRUE」などあり、
+    部分UNIQUE INDEX 作成が失敗する場合の解消用。
+
+    1) 1ユーザー1項目まで（先に付いた方を残す）
+    2) 各項目は1ユーザーまで（login_id 昇順で先頭1名を残し他をFALSE）
+    """
+    cols = ("check1", "check2", "check3", "check4")
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT login_id, check1, check2, check3, check4 FROM user_checkbox_state"
+        )
+        rows = cur.fetchall()
+        for row in rows:
+            login_id = row[0]
+            flags = [bool(row[1]), bool(row[2]), bool(row[3]), bool(row[4])]
+            if sum(1 for f in flags if f) <= 1:
+                continue
+            chosen_idx = next(i for i, f in enumerate(flags) if f)
+            cur.execute(
+                """
+                UPDATE user_checkbox_state
+                SET check1 = %s, check2 = %s, check3 = %s, check4 = %s
+                WHERE login_id = %s
+                """,
+                (
+                    chosen_idx == 0,
+                    chosen_idx == 1,
+                    chosen_idx == 2,
+                    chosen_idx == 3,
+                    login_id,
+                ),
+            )
+
+    with conn.cursor() as cur:
+        for col in cols:
+            cur.execute(
+                f"""
+                SELECT login_id FROM user_checkbox_state
+                WHERE {col} IS TRUE
+                ORDER BY login_id
+                """
+            )
+            holders = [r[0] for r in cur.fetchall()]
+            if len(holders) <= 1:
+                continue
+            for lid in holders[1:]:
+                cur.execute(
+                    f"""
+                    UPDATE user_checkbox_state SET {col} = FALSE WHERE login_id = %s
+                    """,
+                    (lid,),
+                )
+
+
 def init_db() -> None:
     with get_connection() as conn:
         with conn.cursor() as cur:
@@ -40,6 +96,8 @@ def init_db() -> None:
                 )
                 """
             )
+        _migrate_user_rows_for_unique_indexes(conn)
+        with conn.cursor() as cur:
             # 各選択肢は常に最大1ユーザーまで（同時更新の競合もDBで防止）
             for col in ("check1", "check2", "check3", "check4"):
                 cur.execute(

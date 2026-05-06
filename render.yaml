@@ -4,4 +4,5 @@ services:
     env: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app
+    # Render が渡す PORT で待ち受けないとヘルスチェックに失敗します
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT
