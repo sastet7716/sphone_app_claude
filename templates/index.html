@@ -79,7 +79,7 @@
       {% if login_id %}
         <h1>{{ app_name }}</h1>
         <p class="subtitle">
-          交差点を選ぶとすぐに保存されます（他ユーザーの交差点は選べません）
+          枠を選ぶとすぐに保存されます（他のユーザーが取った枠は選べません）
         </p>
         <div class="status">ログイン中: {{ login_id }}</div>
         {% if error %}
@@ -91,24 +91,25 @@
           class="error"
           {% if not no_slot_available %}style="display: none"{% endif %}
         >
-          現在、どの交差点も空いていません（20か所とも他ユーザーが使用中です）。
+          現在、空き枠がありません（{{ slot_count }}枠すべて他ユーザーが使用中です）。
         </div>
         <div id="choice-app">
           <div class="choice-group">
-            {% for value, label in choices_display %}
-            {% set od = occupants_display.get(value) %}
-            <div class="choice-row" data-choice="{{ value }}">
+            {% for slot in slots %}
+            {% set sid = slot.id | string %}
+            {% set od = occupants_display.get(sid) %}
+            <div class="choice-row" data-choice="{{ sid }}">
               <label
                 class="choice-main {% if od and od.login != login_id %}is-disabled{% endif %}"
               >
                 <input
                   type="radio"
                   name="choice"
-                  value="{{ value }}"
-                  {% if selected_choice == value %}checked{% endif %}
+                  value="{{ sid }}"
+                  {% if selected_choice == sid %}checked{% endif %}
                   {% if od and od.login != login_id %}disabled{% endif %}
                 />
-                {{ label }}
+                {{ slot.label }}
               </label>
               <span class="choice-status">
                 {%- if od -%}
@@ -131,6 +132,8 @@
               var loginId = data.login_id;
               var display = data.occupants_display || {};
               var selected = data.selected_choice || "";
+              var slotCount =
+                typeof data.slot_count === "number" ? data.slot_count : null;
               root.querySelectorAll(".choice-row").forEach(function (row) {
                 var key = row.getAttribute("data-choice");
                 var radio = row.querySelector('input[name="choice"]');
@@ -157,6 +160,12 @@
               var slotEl = document.getElementById("no-slot-msg");
               if (slotEl) {
                 slotEl.style.display = data.no_slot_available ? "block" : "none";
+                if (slotCount !== null && data.no_slot_available) {
+                  slotEl.textContent =
+                    "現在、空き枠がありません（" +
+                    slotCount +
+                    "枠すべて他ユーザーが使用中です）。";
+                }
               }
             }
 
