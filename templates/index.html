@@ -61,59 +61,55 @@
         {% if error %}
           <div class="error">{{ error }}</div>
         {% endif %}
+        {% if no_slot_available %}
+          <div class="error">
+            現在、どの項目も空いていません（4つとも他ユーザーが使用中です）。
+          </div>
+        {% endif %}
         <form method="post">
           <div class="choice-group">
-            <label>
-              <input
-                type="radio"
-                name="choice"
-                value=""
-                {% if selected_choice == '' %}checked{% endif %}
-              />
-              選択なし
-            </label>
-            <label class="{% if 'check1' in disabled_choices %}is-disabled{% endif %}">
+            <label class="{% if 'check1' in choice_owners %}is-disabled{% endif %}">
               <input
                 type="radio"
                 name="choice"
                 value="check1"
                 {% if selected_choice == 'check1' %}checked{% endif %}
-                {% if 'check1' in disabled_choices %}disabled{% endif %}
+                {% if 'check1' in choice_owners %}disabled{% endif %}
               />
-              チェック 1{% if 'check1' in disabled_choices %}（他ユーザーが使用中）{% endif %}
+              チェック 1{% if 'check1' in choice_owners %}（{{ choice_owners['check1'] }}さんが使用中）{% endif %}
             </label>
-            <label class="{% if 'check2' in disabled_choices %}is-disabled{% endif %}">
+            <label class="{% if 'check2' in choice_owners %}is-disabled{% endif %}">
               <input
                 type="radio"
                 name="choice"
                 value="check2"
                 {% if selected_choice == 'check2' %}checked{% endif %}
-                {% if 'check2' in disabled_choices %}disabled{% endif %}
+                {% if 'check2' in choice_owners %}disabled{% endif %}
               />
-              チェック 2{% if 'check2' in disabled_choices %}（他ユーザーが使用中）{% endif %}
+              チェック 2{% if 'check2' in choice_owners %}（{{ choice_owners['check2'] }}さんが使用中）{% endif %}
             </label>
-            <label class="{% if 'check3' in disabled_choices %}is-disabled{% endif %}">
+            <label class="{% if 'check3' in choice_owners %}is-disabled{% endif %}">
               <input
                 type="radio"
                 name="choice"
                 value="check3"
                 {% if selected_choice == 'check3' %}checked{% endif %}
-                {% if 'check3' in disabled_choices %}disabled{% endif %}
+                {% if 'check3' in choice_owners %}disabled{% endif %}
               />
-              チェック 3{% if 'check3' in disabled_choices %}（他ユーザーが使用中）{% endif %}
+              チェック 3{% if 'check3' in choice_owners %}（{{ choice_owners['check3'] }}さんが使用中）{% endif %}
             </label>
-            <label class="{% if 'check4' in disabled_choices %}is-disabled{% endif %}">
+            <label class="{% if 'check4' in choice_owners %}is-disabled{% endif %}">
               <input
                 type="radio"
                 name="choice"
                 value="check4"
                 {% if selected_choice == 'check4' %}checked{% endif %}
-                {% if 'check4' in disabled_choices %}disabled{% endif %}
+                {% if 'check4' in choice_owners %}disabled{% endif %}
               />
-              チェック 4{% if 'check4' in disabled_choices %}（他ユーザーが使用中）{% endif %}
+              チェック 4{% if 'check4' in choice_owners %}（{{ choice_owners['check4'] }}さんが使用中）{% endif %}
             </label>
           </div>
-          <button type="submit">保存</button>
+          <button type="submit" {% if no_slot_available %}disabled{% endif %}>保存</button>
         </form>
         <form method="post" action="/logout">
           <button type="submit">ログアウト</button>

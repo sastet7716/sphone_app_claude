@@ -209,43 +209,53 @@ def selected_choice_from_state(state: dict[str, bool]) -> str:
     return ""
 
 
-def choices_taken_by_others(exclude_login_id: str) -> frozenset[str]:
-    """他ユーザーが現在選択している項目（自分の行は除外）。"""
-    taken: set[str] = set()
+def choice_held_by_others(exclude_login_id: str) -> dict[str, str]:
+    """各選択肢を、自分以外のどの login_id が保持しているか。"""
+    cols = ("check1", "check2", "check3", "check4")
+    owners: dict[str, str] = {}
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT check1, check2, check3, check4
+                SELECT login_id, check1, check2, check3, check4
                 FROM user_checkbox_state
                 WHERE login_id != %s
                 """,
                 (exclude_login_id,),
             )
             for row in cur.fetchall():
-                if row[0]:
-                    taken.add("check1")
-                if row[1]:
-                    taken.add("check2")
-                if row[2]:
-                    taken.add("check3")
-                if row[3]:
-                    taken.add("check4")
-    return frozenset(taken)
+                lid = row[0]
+                for i, col in enumerate(cols):
+                    if row[i + 1]:
+                        owners[col] = lid
+    return owners
+
+
+def first_free_choice(held_by_others: dict[str, str]) -> str | None:
+    """他ユーザーに取られていない最初の選択肢。空きがなければ None。"""
+    for k in ("check1", "check2", "check3", "check4"):
+        if k not in held_by_others:
+            return k
+    return None
 
 
 def render_main_logged_in(login_id: str, error: str | None = None):
     ensure_user_row(login_id)
     state = load_state(login_id)
-    selected_choice = selected_choice_from_state(state)
-    disabled_choices = choices_taken_by_others(login_id)
+    stored = selected_choice_from_state(state)
+    choice_owners = choice_held_by_others(login_id)
+    ff = first_free_choice(choice_owners)
+    # DBに未保存のときは画面も未選択（先頭の空きを自動では選ばない）
+    selected_choice = stored
+    no_slot_available = not stored and ff is None
     return render_template(
         "index.html",
         state=state,
         selected_choice=selected_choice,
         login_id=login_id,
         error=error,
-        disabled_choices=disabled_choices,
+        choice_owners=choice_owners,
+        no_slot_available=no_slot_available,
     )
 
 
@@ -262,24 +272,34 @@ def index():
             state=None,
             login_id=None,
             error=None,
-            disabled_choices=frozenset(),
+            choice_owners={},
+            no_slot_available=False,
         )
 
     if request.method == "POST":
         choice = (request.form.get("choice") or "").strip()
-        if choice in VALID_CHOICES and choice in choices_taken_by_others(login_id):
+        if choice not in VALID_CHOICES:
             return render_main_logged_in(
                 login_id,
-                error="その選択肢は他のユーザーが使用中です。別の項目を選ぶか、しばらく待ってください。",
+                error="いずれかの項目を選択してください。",
+            )
+        held = choice_held_by_others(login_id)
+        if choice in held:
+            who = held[choice]
+            return render_main_logged_in(
+                login_id,
+                error=f"その選択肢は {who} さんが使用中です。別の項目を選ぶか、しばらく待ってください。",
             )
         check1, check2, check3, check4 = choice_to_flags(choice)
         try:
             save_state(login_id, check1, check2, check3, check4)
         except psycopg.errors.UniqueViolation:
-            return render_main_logged_in(
-                login_id,
-                error="その選択肢は他のユーザーが使用中です。（同時に選ばれました）",
-            )
+            held_after = choice_held_by_others(login_id)
+            if choice in held_after:
+                err = f"その選択肢は {held_after[choice]} さんが使用中です。（同時に選ばれました）"
+            else:
+                err = "別のユーザーが先に選んだため保存できませんでした。画面を更新してください。"
+            return render_main_logged_in(login_id, error=err)
         return redirect(url_for("index"))
 
     return render_main_logged_in(login_id)
@@ -296,7 +316,8 @@ def login():
             state=None,
             login_id=None,
             error="ログインIDとパスワードを入力してください。",
-            disabled_choices=frozenset(),
+            choice_owners={},
+            no_slot_available=False,
         )
 
     if not is_valid_user(login_id, password):
@@ -305,7 +326,8 @@ def login():
             state=None,
             login_id=None,
             error="認証に失敗しました。IDまたはパスワードを確認してください。",
-            disabled_choices=frozenset(),
+            choice_owners={},
+            no_slot_available=False,
         )
 
     session["login_id"] = login_id
