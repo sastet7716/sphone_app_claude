@@ -3,21 +3,26 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>チェックボックス保存アプリ</title>
+    <title>{{ app_name }}</title>
     <style>
       body {
         font-family: sans-serif;
         margin: 2rem;
       }
       .container {
-        max-width: 420px;
+        max-width: 520px;
         padding: 1rem 1.2rem;
         border: 1px solid #ddd;
         border-radius: 8px;
       }
       h1 {
         margin-top: 0;
-        font-size: 1.2rem;
+        font-size: 1.25rem;
+      }
+      .subtitle {
+        margin: 0 0 0.75rem;
+        color: #444;
+        font-size: 0.95rem;
       }
       .status {
         margin: 0.5rem 0 0.8rem;
@@ -30,7 +35,7 @@
       }
       .choice-group label {
         display: block;
-        margin: 0.6rem 0;
+        margin: 0.45rem 0;
       }
       .choice-group label.is-disabled {
         color: #888;
@@ -56,58 +61,33 @@
   <body>
     <div class="container">
       {% if login_id %}
-        <h1>4つの選択肢（いずれか1つまで・他ユーザー選択済みは不可）</h1>
+        <h1>{{ app_name }}</h1>
+        <p class="subtitle">
+          交差点01〜12からいずれか1つまで（他のユーザーが選んだ交差点は選べません）
+        </p>
         <div class="status">ログイン中: {{ login_id }}</div>
         {% if error %}
           <div class="error">{{ error }}</div>
         {% endif %}
         {% if no_slot_available %}
           <div class="error">
-            現在、どの項目も空いていません（4つとも他ユーザーが使用中です）。
+            現在、どの交差点も空いていません（12か所とも他ユーザーが使用中です）。
           </div>
         {% endif %}
         <form method="post" id="choice-form">
           <div class="choice-group">
-            <label class="{% if 'check1' in choice_owners %}is-disabled{% endif %}">
+            {% for value, label in choices_display %}
+            <label class="{% if value in choice_owners %}is-disabled{% endif %}">
               <input
                 type="radio"
                 name="choice"
-                value="check1"
-                {% if selected_choice == 'check1' %}checked{% endif %}
-                {% if 'check1' in choice_owners %}disabled{% endif %}
+                value="{{ value }}"
+                {% if selected_choice == value %}checked{% endif %}
+                {% if value in choice_owners %}disabled{% endif %}
               />
-              チェック 1{% if 'check1' in choice_owners %}（{{ choice_owners['check1'] }}さんが使用中）{% endif %}
+              {{ label }}{% if value in choice_owners %}（{{ choice_owners[value] }}さんが使用中）{% endif %}
             </label>
-            <label class="{% if 'check2' in choice_owners %}is-disabled{% endif %}">
-              <input
-                type="radio"
-                name="choice"
-                value="check2"
-                {% if selected_choice == 'check2' %}checked{% endif %}
-                {% if 'check2' in choice_owners %}disabled{% endif %}
-              />
-              チェック 2{% if 'check2' in choice_owners %}（{{ choice_owners['check2'] }}さんが使用中）{% endif %}
-            </label>
-            <label class="{% if 'check3' in choice_owners %}is-disabled{% endif %}">
-              <input
-                type="radio"
-                name="choice"
-                value="check3"
-                {% if selected_choice == 'check3' %}checked{% endif %}
-                {% if 'check3' in choice_owners %}disabled{% endif %}
-              />
-              チェック 3{% if 'check3' in choice_owners %}（{{ choice_owners['check3'] }}さんが使用中）{% endif %}
-            </label>
-            <label class="{% if 'check4' in choice_owners %}is-disabled{% endif %}">
-              <input
-                type="radio"
-                name="choice"
-                value="check4"
-                {% if selected_choice == 'check4' %}checked{% endif %}
-                {% if 'check4' in choice_owners %}disabled{% endif %}
-              />
-              チェック 4{% if 'check4' in choice_owners %}（{{ choice_owners['check4'] }}さんが使用中）{% endif %}
-            </label>
+            {% endfor %}
           </div>
           <button type="submit" {% if no_slot_available %}disabled{% endif %}>保存</button>
         </form>
@@ -134,7 +114,8 @@
           })();
         </script>
       {% else %}
-        <h1>ログイン</h1>
+        <h1>{{ app_name }}</h1>
+        <p class="subtitle">ログインしてください</p>
         {% if error %}
           <div class="error">{{ error }}</div>
         {% endif %}
