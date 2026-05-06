@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import csv
 import os
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from flask import Flask, jsonify, redirect, render_template, request, session, url_for
 import psycopg
@@ -21,10 +23,19 @@ if not DATABASE_URL:
         "DATABASE_URL が未設定です。無料PostgreSQLの接続URLを環境変数に設定してください。"
     )
 
-# 交差点01〜12（内部キーは check1 … check12）
-CHOICE_KEYS = tuple(f"check{i}" for i in range(1, 13))
+NUM_INTERSECTIONS = 20
+CHOICE_KEYS = tuple(f"check{i}" for i in range(1, NUM_INTERSECTIONS + 1))
 VALID_CHOICES = frozenset(CHOICE_KEYS)
 APP_NAME = "交差点見守り"
+JST = ZoneInfo("Asia/Tokyo")
+
+
+def format_claim_time(dt: datetime | None) -> str:
+    if dt is None:
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+    return dt.astimezone(JST).strftime("%H:%M")
 
 
 def get_connection() -> psycopg.Connection:
@@ -40,21 +51,20 @@ def _migrate_user_rows_for_unique_indexes(conn: psycopg.Connection) -> None:
     2) 各項目は1ユーザーまで（login_id 昇順で先頭1名を残し他をFALSE）
     """
     cols = CHOICE_KEYS
+    n = NUM_INTERSECTIONS
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT login_id, "
-            + ", ".join(cols)
-            + " FROM user_checkbox_state"
+            "SELECT login_id, " + ", ".join(cols) + " FROM user_checkbox_state"
         )
         rows = cur.fetchall()
         for row in rows:
             login_id = row[0]
-            flags = [bool(row[i + 1]) for i in range(12)]
+            flags = [bool(row[i + 1]) for i in range(n)]
             if sum(1 for f in flags if f) <= 1:
                 continue
             chosen_idx = next(i for i, f in enumerate(flags) if f)
-            sets = ", ".join(f"{cols[i]} = %s" for i in range(12))
-            vals = tuple(i == chosen_idx for i in range(12)) + (login_id,)
+            sets = ", ".join(f"{cols[i]} = %s" for i in range(n))
+            vals = tuple(i == chosen_idx for i in range(n)) + (login_id,)
             cur.execute(
                 f"""
                 UPDATE user_checkbox_state
@@ -85,9 +95,32 @@ def _migrate_user_rows_for_unique_indexes(conn: psycopg.Connection) -> None:
                 )
 
 
+def _ensure_claims_seeded(conn: psycopg.Connection) -> None:
+    """初回のみ boolean 状態から claim 行を補完（時刻は現在時刻）。"""
+    with conn.cursor() as cur:
+        cur.execute("SELECT 1 FROM intersection_claim LIMIT 1")
+        if cur.fetchone() is not None:
+            return
+        cur.execute("SELECT login_id, " + ", ".join(CHOICE_KEYS) + " FROM user_checkbox_state")
+        for row in cur.fetchall():
+            lid = row[0]
+            for i, col in enumerate(CHOICE_KEYS):
+                if row[i + 1]:
+                    cur.execute(
+                        """
+                        INSERT INTO intersection_claim (slot_index, login_id, claimed_at)
+                        VALUES (%s, %s, NOW())
+                        ON CONFLICT (slot_index) DO UPDATE
+                        SET login_id = EXCLUDED.login_id,
+                            claimed_at = EXCLUDED.claimed_at
+                        """,
+                        (i + 1, lid),
+                    )
+
+
 def init_db() -> None:
     col_defs = ",\n                    ".join(
-        f"check{i} BOOLEAN NOT NULL DEFAULT FALSE" for i in range(1, 13)
+        f"check{i} BOOLEAN NOT NULL DEFAULT FALSE" for i in range(1, NUM_INTERSECTIONS + 1)
     )
     with get_connection() as conn:
         with conn.cursor() as cur:
@@ -99,17 +132,26 @@ def init_db() -> None:
                 )
                 """
             )
-            # 旧4列のみのDBを12列へ拡張
-            for i in range(5, 13):
+            for i in range(1, NUM_INTERSECTIONS + 1):
                 cur.execute(
                     f"""
                     ALTER TABLE user_checkbox_state
                     ADD COLUMN IF NOT EXISTS check{i} BOOLEAN NOT NULL DEFAULT FALSE
                     """
                 )
+            cur.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS intersection_claim (
+                    slot_index SMALLINT PRIMARY KEY
+                        CHECK (slot_index >= 1 AND slot_index <= {NUM_INTERSECTIONS}),
+                    login_id TEXT NOT NULL,
+                    claimed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
         _migrate_user_rows_for_unique_indexes(conn)
+        _ensure_claims_seeded(conn)
         with conn.cursor() as cur:
-            # 各交差点は常に最大1ユーザーまで（同時更新の競合もDBで防止）
             for col in CHOICE_KEYS:
                 cur.execute(
                     f"""
@@ -145,7 +187,7 @@ def is_valid_user(login_id: str, password: str) -> bool:
 
 def ensure_user_row(login_id: str) -> None:
     cols = ", ".join(["login_id"] + list(CHOICE_KEYS))
-    falses = ", ".join(["FALSE"] * 12)
+    falses = ", ".join(["FALSE"] * NUM_INTERSECTIONS)
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -177,21 +219,21 @@ def load_state(login_id: str) -> dict[str, bool]:
     if row is None:
         return {k: False for k in CHOICE_KEYS}
 
-    return {CHOICE_KEYS[i]: bool(row[i]) for i in range(12)}
+    return {CHOICE_KEYS[i]: bool(row[i]) for i in range(NUM_INTERSECTIONS)}
 
 
 def choice_to_flags(choice: str) -> tuple[bool, ...]:
     """常に高々1つだけ True。choice が空または不正ならすべて False。"""
     if choice not in VALID_CHOICES:
-        return (False,) * 12
+        return (False,) * NUM_INTERSECTIONS
     idx = int(choice.replace("check", "")) - 1
-    return tuple(i == idx for i in range(12))
+    return tuple(i == idx for i in range(NUM_INTERSECTIONS))
 
 
 def save_state(login_id: str, flags: tuple[bool, ...]) -> None:
-    if len(flags) != 12:
-        raise ValueError("flags は12要素である必要があります")
-    sets = ", ".join(f"{CHOICE_KEYS[i]} = %s" for i in range(12))
+    if len(flags) != NUM_INTERSECTIONS:
+        raise ValueError(f"flags は{NUM_INTERSECTIONS}要素である必要があります")
+    sets = ", ".join(f"{CHOICE_KEYS[i]} = %s" for i in range(NUM_INTERSECTIONS))
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -202,6 +244,31 @@ def save_state(login_id: str, flags: tuple[bool, ...]) -> None:
                 """,
                 (*flags, login_id),
             )
+        conn.commit()
+
+
+def sync_intersection_claim(login_id: str, choice: str) -> None:
+    """boolean 更新後に、スロット取得時刻テーブルを同期する。"""
+    slot: int | None = None
+    if choice in VALID_CHOICES:
+        slot = int(choice.replace("check", ""))
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM intersection_claim WHERE login_id = %s",
+                (login_id,),
+            )
+            if slot is not None:
+                cur.execute(
+                    """
+                    INSERT INTO intersection_claim (slot_index, login_id, claimed_at)
+                    VALUES (%s, %s, NOW())
+                    ON CONFLICT (slot_index) DO UPDATE
+                    SET login_id = EXCLUDED.login_id,
+                        claimed_at = EXCLUDED.claimed_at
+                    """,
+                    (slot, login_id),
+                )
         conn.commit()
 
 
@@ -230,9 +297,32 @@ def choice_held_globally() -> dict[str, str]:
     return owners
 
 
+def claim_times_by_slot() -> dict[int, datetime]:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT slot_index, claimed_at FROM intersection_claim")
+            return {int(row[0]): row[1] for row in cur.fetchall()}
+
+
+def occupants_with_times() -> dict[str, dict[str, str]]:
+    """各占有中スロットの表示用 {login, time(HH:MM JST)}。"""
+    base = choice_held_globally()
+    times = claim_times_by_slot()
+    out: dict[str, dict[str, str]] = {}
+    for key, lid in base.items():
+        idx = int(key.replace("check", ""))
+        dt = times.get(idx)
+        t = format_claim_time(dt)
+        out[key] = {
+            "login": lid,
+            "time": t if t else "--:--",
+        }
+    return out
+
+
 def choices_display() -> list[tuple[str, str]]:
     """テンプレート用 (value, 表示ラベル)"""
-    return [(f"check{i}", f"交差点{i:02d}") for i in range(1, 13)]
+    return [(f"check{i}", f"交差点{i:02d}") for i in range(1, NUM_INTERSECTIONS + 1)]
 
 
 def _no_slot_available(login_id: str, state: dict[str, bool], occupants: dict[str, str]) -> bool:
@@ -242,9 +332,20 @@ def _no_slot_available(login_id: str, state: dict[str, bool], occupants: dict[st
     return all(k in occupants for k in CHOICE_KEYS)
 
 
+def _success_payload(login_id: str) -> dict:
+    occupants = choice_held_globally()
+    state = load_state(login_id)
+    return {
+        "selected_choice": selected_choice_from_state(state),
+        "occupants_display": occupants_with_times(),
+        "login_id": login_id,
+        "no_slot_available": _no_slot_available(login_id, state, occupants),
+    }
+
+
 def try_save_choice(login_id: str, choice: str) -> tuple[bool, str | None, dict]:
     """
-    選択を保存。成功時は JSON 用 dict（occupants, selected_choice 等）を返す。
+    選択を保存。成功時は JSON 用 dict（occupants_display, selected_choice 等）を返す。
     """
     if choice not in VALID_CHOICES and choice != "":
         return False, "不正な選択です。", {}
@@ -252,15 +353,9 @@ def try_save_choice(login_id: str, choice: str) -> tuple[bool, str | None, dict]
     occupants_before = choice_held_globally()
 
     if choice == "":
-        save_state(login_id, (False,) * 12)
-        occupants = choice_held_globally()
-        state = load_state(login_id)
-        return True, None, {
-            "selected_choice": "",
-            "occupants": occupants,
-            "login_id": login_id,
-            "no_slot_available": _no_slot_available(login_id, state, occupants),
-        }
+        save_state(login_id, (False,) * NUM_INTERSECTIONS)
+        sync_intersection_claim(login_id, "")
+        return True, None, _success_payload(login_id)
 
     occ = occupants_before.get(choice)
     if occ is not None and occ != login_id:
@@ -288,14 +383,8 @@ def try_save_choice(login_id: str, choice: str) -> tuple[bool, str | None, dict]
             {},
         )
 
-    occupants = choice_held_globally()
-    state = load_state(login_id)
-    return True, None, {
-        "selected_choice": selected_choice_from_state(state),
-        "occupants": occupants,
-        "login_id": login_id,
-        "no_slot_available": _no_slot_available(login_id, state, occupants),
-    }
+    sync_intersection_claim(login_id, choice)
+    return True, None, _success_payload(login_id)
 
 
 def render_main_logged_in(login_id: str, error: str | None = None):
@@ -303,6 +392,7 @@ def render_main_logged_in(login_id: str, error: str | None = None):
     state = load_state(login_id)
     stored = selected_choice_from_state(state)
     occupants = choice_held_globally()
+    occupants_display = occupants_with_times()
     selected_choice = stored
     no_slot_available = _no_slot_available(login_id, state, occupants)
     return render_template(
@@ -314,6 +404,7 @@ def render_main_logged_in(login_id: str, error: str | None = None):
         login_id=login_id,
         error=error,
         occupants=occupants,
+        occupants_display=occupants_display,
         no_slot_available=no_slot_available,
     )
 
@@ -334,6 +425,7 @@ def index():
             login_id=None,
             error=None,
             occupants={},
+            occupants_display={},
             no_slot_available=False,
         )
 
@@ -371,6 +463,7 @@ def login():
             login_id=None,
             error="ログインIDとパスワードを入力してください。",
             occupants={},
+            occupants_display={},
             no_slot_available=False,
         )
 
@@ -383,6 +476,7 @@ def login():
             login_id=None,
             error="認証に失敗しました。IDまたはパスワードを確認してください。",
             occupants={},
+            occupants_display={},
             no_slot_available=False,
         )
 

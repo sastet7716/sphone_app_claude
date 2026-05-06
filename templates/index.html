@@ -91,27 +91,28 @@
           class="error"
           {% if not no_slot_available %}style="display: none"{% endif %}
         >
-          現在、どの交差点も空いていません（12か所とも他ユーザーが使用中です）。
+          現在、どの交差点も空いていません（20か所とも他ユーザーが使用中です）。
         </div>
         <div id="choice-app">
           <div class="choice-group">
             {% for value, label in choices_display %}
+            {% set od = occupants_display.get(value) %}
             <div class="choice-row" data-choice="{{ value }}">
               <label
-                class="choice-main {% if value in occupants and occupants[value] != login_id %}is-disabled{% endif %}"
+                class="choice-main {% if od and od.login != login_id %}is-disabled{% endif %}"
               >
                 <input
                   type="radio"
                   name="choice"
                   value="{{ value }}"
                   {% if selected_choice == value %}checked{% endif %}
-                  {% if value in occupants and occupants[value] != login_id %}disabled{% endif %}
+                  {% if od and od.login != login_id %}disabled{% endif %}
                 />
                 {{ label }}
               </label>
               <span class="choice-status">
-                {%- if value in occupants -%}
-                  {{ occupants[value] }}さんが使用中
+                {%- if od -%}
+                  {{ od.login }}さん{{ od.time }}
                 {%- endif -%}
               </span>
             </div>
@@ -128,17 +129,18 @@
 
             function applyFromApi(data) {
               var loginId = data.login_id;
-              var occ = data.occupants || {};
+              var display = data.occupants_display || {};
               var selected = data.selected_choice || "";
               root.querySelectorAll(".choice-row").forEach(function (row) {
                 var key = row.getAttribute("data-choice");
                 var radio = row.querySelector('input[name="choice"]');
                 var status = row.querySelector(".choice-status");
                 var label = row.querySelector(".choice-main");
-                var owner = occ[key];
-                if (owner) {
-                  status.textContent = owner + "さんが使用中";
-                  if (owner !== loginId) {
+                var od = display[key];
+                if (od && od.login) {
+                  status.textContent =
+                    od.login + "さん" + (od.time || "--:--");
+                  if (od.login !== loginId) {
                     radio.disabled = true;
                     label.classList.add("is-disabled");
                   } else {
