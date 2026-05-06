@@ -29,6 +29,13 @@ TENANT_NAME = os.environ.get("TENANT_NAME", "デフォルト組織")
 TENANT_APP_TITLE = os.environ.get("TENANT_APP_TITLE", "資源予約")
 DEFAULT_SLOT_COUNT = int(os.environ.get("DEFAULT_SLOT_COUNT", "20"))
 DEFAULT_SLOT_LABEL_PREFIX = os.environ.get("DEFAULT_SLOT_LABEL_PREFIX", "スロット")
+# 他ユーザーの選択を画面に反映するポーリング間隔（ミリ秒、1〜30秒）
+try:
+    POLL_INTERVAL_MS = max(
+        1000, min(30000, int(os.environ.get("POLL_INTERVAL_MS", "2500")))
+    )
+except ValueError:
+    POLL_INTERVAL_MS = 2500
 
 JST = ZoneInfo("Asia/Tokyo")
 
@@ -331,6 +338,7 @@ def render_main_logged_in(login_id: str, error: str | None = None):
         occupants_display=occupants_display(tenant_id),
         no_slot_available=_no_slot_available(tenant_id, login_id, slots, holders),
         slot_count=len(slots),
+        poll_interval_ms=POLL_INTERVAL_MS,
     )
 
 
@@ -384,6 +392,20 @@ def api_save_choice():
     if not ok:
         return jsonify({"ok": False, "error": err or "保存に失敗しました。"}), 400
 
+    return jsonify({"ok": True, **payload})
+
+
+@app.get("/api/state")
+def api_state():
+    """ログイン中ユーザーの表示用状態（他ユーザーの更新をポーリングで取り込む）。"""
+    login_id = session.get("login_id")
+    if not login_id:
+        return jsonify({"ok": False, "error": "ログインが必要です。"}), 401
+
+    tenant_id = get_tenant_id()
+    slots = list_slots(tenant_id)
+    holders = holders_login_by_slot(tenant_id)
+    payload = _success_payload(tenant_id, login_id, slots, holders)
     return jsonify({"ok": True, **payload})
 
 

@@ -93,7 +93,7 @@
         >
           現在、空き枠がありません（{{ slot_count }}枠すべて他ユーザーが使用中です）。
         </div>
-        <div id="choice-app">
+        <div id="choice-app" data-poll-ms="{{ poll_interval_ms }}">
           <div class="choice-group">
             {% for slot in slots %}
             {% set sid = slot.id | string %}
@@ -127,6 +127,10 @@
           (function () {
             var root = document.getElementById("choice-app");
             if (!root) return;
+
+            var savePending = false;
+            var pollInFlight = false;
+            var pollMs = parseInt(root.getAttribute("data-poll-ms"), 10) || 2500;
 
             function applyFromApi(data) {
               var loginId = data.login_id;
@@ -170,6 +174,7 @@
             }
 
             function saveChoice(choice) {
+              savePending = true;
               fetch("/api/save-choice", {
                 method: "POST",
                 credentials: "same-origin",
@@ -197,8 +202,33 @@
                 })
                 .catch(function () {
                   window.location.reload();
+                })
+                .finally(function () {
+                  savePending = false;
                 });
             }
+
+            function pollOnce() {
+              if (savePending || pollInFlight) return;
+              if (document.visibilityState !== "visible") return;
+              pollInFlight = true;
+              fetch("/api/state", { credentials: "same-origin" })
+                .then(function (r) {
+                  return r.json();
+                })
+                .then(function (data) {
+                  if (data.ok) applyFromApi(data);
+                })
+                .catch(function () {})
+                .finally(function () {
+                  pollInFlight = false;
+                });
+            }
+
+            var pollTimer = setInterval(pollOnce, pollMs);
+            document.addEventListener("visibilitychange", function () {
+              if (document.visibilityState === "visible") pollOnce();
+            });
 
             function syncSave() {
               var checked = root.querySelector('input[name="choice"]:checked');
