@@ -66,7 +66,7 @@
             現在、どの項目も空いていません（4つとも他ユーザーが使用中です）。
           </div>
         {% endif %}
-        <form method="post">
+        <form method="post" id="choice-form">
           <div class="choice-group">
             <label class="{% if 'check1' in choice_owners %}is-disabled{% endif %}">
               <input
@@ -114,6 +114,25 @@
         <form method="post" action="/logout">
           <button type="submit">ログアウト</button>
         </form>
+        <script>
+          (function () {
+            var form = document.getElementById("choice-form");
+            if (!form) return;
+            var radios = form.querySelectorAll('input[type="radio"][name="choice"]');
+            radios.forEach(function (radio) {
+              if (radio.disabled) return;
+              radio.addEventListener("mousedown", function () {
+                radio.setAttribute("data-was-checked", radio.checked ? "1" : "");
+              });
+              radio.addEventListener("click", function () {
+                if (radio.getAttribute("data-was-checked") === "1") {
+                  radio.checked = false;
+                }
+                radio.removeAttribute("data-was-checked");
+              });
+            });
+          })();
+        </script>
       {% else %}
         <h1>ログイン</h1>
         {% if error %}

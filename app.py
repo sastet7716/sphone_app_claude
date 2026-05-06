@@ -278,11 +278,17 @@ def index():
 
     if request.method == "POST":
         choice = (request.form.get("choice") or "").strip()
-        if choice not in VALID_CHOICES:
+        if choice not in VALID_CHOICES and choice != "":
             return render_main_logged_in(
                 login_id,
-                error="いずれかの項目を選択してください。",
+                error="不正な選択です。",
             )
+
+        # 未選択のまま保存 = DB上もすべて OFF（ラジオをクリックで解除した状態）
+        if choice == "":
+            save_state(login_id, False, False, False, False)
+            return redirect(url_for("index"))
+
         held = choice_held_by_others(login_id)
         if choice in held:
             who = held[choice]
